@@ -23,9 +23,11 @@ swiftc -O \
 echo "Copying Info.plist..."
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 
-# Ad-hoc code signature so macOS will run it locally without Gatekeeper fuss.
+# Ad-hoc code signature — required for arm64 apps to launch at all.
+# Do NOT swallow errors: an unsigned/invalidly-signed arm64 app is killed by macOS.
 echo "Code signing (ad-hoc)..."
-codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+codesign --force --sign - "$APP_BUNDLE"
+codesign --verify --strict --verbose=1 "$APP_BUNDLE"
 
 echo "Built: $APP_BUNDLE"
 echo "Run with:  open \"$APP_BUNDLE\"   (or move it to /Applications)"
