@@ -129,6 +129,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updatesItem.target = self
+        menu.addItem(updatesItem)
+
         let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -485,6 +489,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    // MARK: - Check for updates
+
+    private static let repo = "Raithdk/Caffeinate-app"
+    private var releasesPageURL: URL { URL(string: "https://github.com/\(Self.repo)/releases")! }
+
+    @objc private func checkForUpdates() {
+        let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+
+        var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest")!)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.handleUpdateResult(current: current, data: data, response: response, error: error)
+            }
+        }.resume()
+    }
+
+    private func handleUpdateResult(current: String, data: Data?, response: URLResponse?, error: Error?) {
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+        if let error {
+            return showUpdateAlert(title: "Couldn't check for updates",
+                                   message: error.localizedDescription, offerReleases: true)
+        }
+        if status == 404 {
+            return showUpdateAlert(title: "No updates available",
+                                   message: "No releases have been published yet.", offerReleases: true)
+        }
+        guard status == 200, let data,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = json["tag_name"] as? String else {
+            return showUpdateAlert(title: "Couldn't check for updates",
+                                   message: "Unexpected response from GitHub (status \(status)).", offerReleases: true)
+        }
+
+        let pageURL = (json["html_url"] as? String).flatMap(URL.init(string:)) ?? releasesPageURL
+
+        if isNewer(tag, than: current) {
+            showUpdateAlert(title: "Update available",
+                            message: "Version \(tag) is available. You have \(current).",
+                            offerReleases: true, pageURL: pageURL, downloadTitle: "Download…")
+        } else {
+            showUpdateAlert(title: "You're up to date",
+                            message: "You have the latest version (\(current)).", offerReleases: false)
+        }
+    }
+
+    private func showUpdateAlert(title: String, message: String, offerReleases: Bool,
+                                 pageURL: URL? = nil, downloadTitle: String = "Open Releases Page") {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        if offerReleases {
+            alert.addButton(withTitle: downloadTitle)
+            alert.addButton(withTitle: "Close")
+        } else {
+            alert.addButton(withTitle: "OK")
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn && offerReleases {
+            NSWorkspace.shared.open(pageURL ?? releasesPageURL)
+        }
+    }
+
+    /// Compare dotted version strings, ignoring a leading "v" (e.g. "v1.2" > "1.1").
+    private func isNewer(_ remote: String, than local: String) -> Bool {
+        func parts(_ s: String) -> [Int] {
+            s.split(whereSeparator: { !$0.isNumber && $0 != "." })
+                .joined()
+                .split(separator: ".")
+                .map { Int($0) ?? 0 }
+        }
+        let r = parts(remote), l = parts(local)
+        for i in 0..<max(r.count, l.count) {
+            let rv = i < r.count ? r[i] : 0
+            let lv = i < l.count ? l[i] : 0
+            if rv != lv { return rv > lv }
+        }
+        return false
     }
 }
 

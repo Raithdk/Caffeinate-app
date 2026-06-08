@@ -45,6 +45,7 @@ Schedule
 ─────────────
 Launch at Login        ✓
 ─────────────
+Check for Updates…       ← compares your version against the latest GitHub release
 Quit
 ```
 
@@ -147,11 +148,44 @@ code-signs it so macOS will run it locally.
 
 ---
 
+## Checking for updates
+
+Click the menu bar icon and choose **Check for Updates…**. The app asks GitHub for the
+latest published [release](https://github.com/Raithdk/Caffeinate-app/releases) and
+compares it to your installed version:
+
+- **Update available** → offers to open the release page so you can download it.
+- **Up to date** → tells you you're on the latest version.
+- **No releases yet / offline** → lets you know, and can open the releases page anyway.
+
+> Releases are published automatically — see below.
+
+---
+
 ## Quitting
 
 Click the menu bar icon and choose **Quit** (or press <kbd>⌘Q</kbd> while the menu is
 open). Quitting always stops the underlying `caffeinate` process, so nothing is left
 keeping your Mac awake.
+
+---
+
+## Automatic releases
+
+Every push to `main` publishes a new GitHub Release automatically, via
+[`.github/workflows/release.yml`](.github/workflows/release.yml):
+
+- A macOS Actions runner builds the app with `./build.sh`.
+- The version is **auto-incremented** — the workflow reads the latest release tag and
+  bumps the last number (e.g. `v1.3` → `v1.4`), stamps it into `Info.plist`, and builds
+  with it. No manual version bumping.
+- The built app is zipped and attached to the release, with auto-generated release notes.
+
+So **Check for Updates…** in the app will see each new release right after a push. The
+workflow uses the repo's built-in `GITHUB_TOKEN`, so there's nothing to configure.
+
+> The published `.app` is ad-hoc signed, not notarized — fine for personal use; other
+> people downloading it will see a Gatekeeper prompt on first open.
 
 ---
 
@@ -165,6 +199,8 @@ caffinate-app/
 ├── build.sh            # compiles + bundles + signs into build/Caffinate.app
 ├── install.sh          # build + install to /Applications + launch
 ├── uninstall.sh        # quit + remove from /Applications
+├── .github/workflows/
+│   └── release.yml     # auto-publishes a versioned release on every push to main
 └── README.md
 ```
 

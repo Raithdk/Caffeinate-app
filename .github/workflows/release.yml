@@ -1,0 +1,72 @@
+name: Release
+
+# Every push to main publishes a new release, auto-incrementing the version.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # also allow manual runs from the Actions tab
+
+permissions:
+  contents: write           # needed to create tags and releases
+
+# Serialize runs so two quick pushes can't race to the same version number.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest   # required: we need swiftc + the macOS SDK to build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute next version
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Latest released tag, if any (e.g. "v1.0.3").
+          LATEST="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)"
+
+          if [ -z "$LATEST" ]; then
+            # No releases yet — start from the version in Info.plist.
+            BASE="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Info.plist)"
+          else
+            BASE="${LATEST#v}"
+          fi
+
+          # Bump the last numeric component (portable: avoids bash 4 negative indexing).
+          IFS='.' read -ra PARTS <<< "$BASE"
+          IDX=$(( ${#PARTS[@]} - 1 ))
+          PARTS[$IDX]=$(( ${PARTS[$IDX]} + 1 ))
+          NEXT="$(IFS='.'; echo "${PARTS[*]}")"
+
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT (from ${LATEST:-Info.plist=$BASE})"
+
+      - name: Stamp version into Info.plist
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $V" Info.plist
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Zip app
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent build/Caffinate.app build/Caffinate.zip
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          gh release create "v$V" build/Caffinate.zip \
+            --title "v$V" \
+            --target "${{ github.sha }}" \
+            --generate-notes
