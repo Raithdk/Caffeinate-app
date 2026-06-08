@@ -38,6 +38,11 @@ Timer
    Until 16:00              ← one-click: stay awake until 4 PM
    Until a time…            ← stay awake until a clock time you type (e.g. 16:00)
 ─────────────
+Schedule
+   Auto-start daily until 16:00  ✓   ← recurring: keep awake until this time
+   Weekdays only (Mon–Fri)       ✓   ← skip weekends (on by default)
+   Change daily time…                ← pick the daily stop time
+─────────────
 Launch at Login        ✓
 ─────────────
 Quit
@@ -48,6 +53,24 @@ new duration). **Until a time…** pops up a small prompt where you type a 24-ho
 (`16:00`, `9:30`, even `1600` or `16` all work); if that time has already passed today,
 it counts as tomorrow. When the timer elapses, the Mac is allowed to sleep again and the
 icon returns to the outlined cup automatically.
+
+### Daily auto-start (recurring)
+
+Turn on **Auto-start daily until 16:00** and the app keeps your Mac awake until that
+time *every day*, automatically:
+
+- **Each morning when you open your Mac**, it starts a session that runs until the daily
+  time (e.g. open the lid at 07:30 → awake until 16:00).
+- At the daily time it stops, and your Mac sleeps normally for the rest of the day.
+- Use **Change daily time…** to set a different stop time.
+- **Weekdays only (Mon–Fri)** is **on by default**, so opening your Mac on a Saturday or
+  Sunday won't start a session. Turn it off to have the schedule run all seven days.
+
+The setting is remembered across restarts. Enabling it also turns on **Launch at Login**
+automatically, since the app has to be running to start the session each day. It re-arms
+on launch and whenever the Mac wakes from sleep, recomputing the remaining time so the
+stop time stays accurate even if the Mac slept partway through the day. A manual session
+you start yourself is never overridden by the schedule.
 
 ---
 

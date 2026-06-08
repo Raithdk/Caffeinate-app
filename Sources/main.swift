@@ -9,6 +9,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var startDate: Date?
     private var timeout: TimeInterval?   // nil = indefinite; otherwise auto-stop after N seconds
     private var ticker: Timer?
+    private var isDailySession = false   // true if the current session was started by the daily schedule
+
+    // Persisted "auto-start every day until <time>" settings.
+    private let defaults = UserDefaults.standard
+    private var dailyEnabled: Bool {
+        get { defaults.bool(forKey: "dailyEnabled") }
+        set { defaults.set(newValue, forKey: "dailyEnabled") }
+    }
+    private var dailyTime: String {
+        get { defaults.string(forKey: "dailyTime") ?? "16:00" }
+        set { defaults.set(newValue, forKey: "dailyTime") }
+    }
+    private var weekdaysOnly: Bool {
+        get { defaults.bool(forKey: "weekdaysOnly") }   // default registered as true on launch
+        set { defaults.set(newValue, forKey: "weekdaysOnly") }
+    }
 
     // Timer presets shown in the menu, in seconds. nil = indefinite (no -t).
     private let presets: [(label: String, seconds: TimeInterval?)] = [
@@ -24,11 +40,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let toggleMenuItem = NSMenuItem(title: "Turn On", action: #selector(toggle), keyEquivalent: "t")
     private var presetMenuItems: [NSMenuItem] = []
     private let launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+    private let dailyMenuItem = NSMenuItem(title: "Auto-start daily", action: #selector(toggleDaily), keyEquivalent: "")
+    private let weekdaysMenuItem = NSMenuItem(title: "Weekdays only (Mon–Fri)", action: #selector(toggleWeekdays), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        defaults.register(defaults: ["weekdaysOnly": true])   // weekdays-only is on by default
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.menu = buildMenu()   // clicking the icon opens the menu
+
+        // Re-arm the daily schedule whenever the Mac wakes from sleep (e.g. you open
+        // the lid the next morning) — this is what restarts it for the new day.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification, object: nil)
+
+        applyDailySchedule()   // arm on launch (e.g. when launched at login)
         updateUI()
+    }
+
+    @objc private func systemDidWake() {
+        applyDailySchedule()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -70,6 +102,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         untilItem.target = self
         untilItem.indentationLevel = 1
         menu.addItem(untilItem)
+
+        menu.addItem(.separator())
+
+        let scheduleHeader = NSMenuItem(title: "Schedule", action: nil, keyEquivalent: "")
+        scheduleHeader.isEnabled = false
+        menu.addItem(scheduleHeader)
+
+        dailyMenuItem.target = self
+        dailyMenuItem.indentationLevel = 1
+        menu.addItem(dailyMenuItem)
+
+        weekdaysMenuItem.target = self
+        weekdaysMenuItem.indentationLevel = 1
+        menu.addItem(weekdaysMenuItem)
+
+        let changeDailyItem = NSMenuItem(title: "Change daily time…", action: #selector(changeDailyTime), keyEquivalent: "")
+        changeDailyItem.target = self
+        changeDailyItem.indentationLevel = 1
+        menu.addItem(changeDailyItem)
 
         menu.addItem(.separator())
 
@@ -158,9 +209,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startUntil(field.stringValue)
     }
 
-    /// Parse "HH:mm" (also tolerates "16", "16.00", "1600") into the next occurrence
-    /// of that clock time at or after `now` — today if still ahead, otherwise tomorrow.
-    private func targetDate(from text: String, now: Date) -> Date? {
+    // MARK: - Daily schedule
+
+    @objc private func toggleDaily() {
+        dailyEnabled.toggle()
+        if dailyEnabled {
+            // The schedule only works if the app launches when you log in, so turn
+            // that on automatically.
+            if SMAppService.mainApp.status != .enabled {
+                try? SMAppService.mainApp.register()
+            }
+            applyDailySchedule()
+        } else if isActive && isDailySession {
+            // Turning the schedule off stops only a session it started itself.
+            stopCaffeinate()
+        }
+        updateUI()
+    }
+
+    @objc private func toggleWeekdays() {
+        weekdaysOnly.toggle()
+        // Re-evaluate immediately: e.g. if it's the weekend and we just turned this on
+        // while an auto session is running, it should stop now.
+        applyDailySchedule()
+        updateUI()
+    }
+
+    @objc private func changeDailyTime() {
+        let alert = NSAlert()
+        alert.messageText = "Auto-start every day until…"
+        alert.informativeText = "Enter a 24-hour time (e.g. 16:00). Each day your Mac is kept awake until this time."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        field.stringValue = dailyTime
+        alert.accessoryView = field
+
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        guard let (h, m) = parseHourMinute(field.stringValue) else {
+            let err = NSAlert()
+            err.messageText = "Couldn't read that time"
+            err.informativeText = "Please use a 24-hour time like 16:00 or 9:30."
+            err.runModal()
+            return
+        }
+
+        dailyTime = String(format: "%02d:%02d", h, m)
+        if dailyEnabled { applyDailySchedule() }
+        updateUI()
+    }
+
+    /// Start/stop the auto session so it matches the daily setting for *today*.
+    /// Called on launch and on wake — this is what makes it recur each day.
+    private func applyDailySchedule() {
+        guard dailyEnabled, let target = todayOccurrence(of: dailyTime, now: Date()) else { return }
+        let now = Date()
+
+        // On weekends (when weekdays-only is on) the schedule never starts; stop an
+        // auto session if one is somehow running, and do nothing else.
+        if weekdaysOnly && isWeekend(now) {
+            if isActive && isDailySession { stopCaffeinate() }
+            updateUI()
+            return
+        }
+
+        if now < target {
+            // Should be awake until target. Start it, or — if a previous auto session
+            // is running — restart to correct for any time spent asleep.
+            if !isActive || isDailySession {
+                stopCaffeinate()
+                startCaffeinate(timeout: target.timeIntervalSince(now), daily: true)
+            }
+        } else if isActive && isDailySession {
+            // Past today's time: stop, but only an auto-started session.
+            stopCaffeinate()
+        }
+        updateUI()
+    }
+
+    // MARK: - Time parsing
+
+    /// Parse "HH:mm" (also tolerates "16", "16.00", "1600") into an (hour, minute) pair.
+    private func parseHourMinute(_ text: String) -> (hour: Int, minute: Int)? {
         let digits = text.split(whereSeparator: { !$0.isNumber }).map(String.init)
         let hour: Int
         let minute: Int
@@ -179,13 +314,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
         guard (0...23).contains(hour), (0...59).contains(minute) else { return nil }
+        return (hour, minute)
+    }
 
+    /// Next occurrence of the clock time at or after `now` — today if ahead, else tomorrow.
+    private func targetDate(from text: String, now: Date) -> Date? {
+        guard let (h, m) = parseHourMinute(text) else { return nil }
         let cal = Calendar.current
-        guard var target = cal.date(bySettingHour: hour, minute: minute, second: 0, of: now) else { return nil }
+        guard var target = cal.date(bySettingHour: h, minute: m, second: 0, of: now) else { return nil }
         if target <= now {
             target = cal.date(byAdding: .day, value: 1, to: target) ?? target
         }
         return target
+    }
+
+    /// True on Saturday or Sunday (so the schedule runs Mon–Fri only).
+    private func isWeekend(_ date: Date) -> Bool {
+        let weekday = Calendar.current.component(.weekday, from: date)   // 1 = Sun … 7 = Sat
+        return weekday == 1 || weekday == 7
+    }
+
+    /// Today's occurrence of the clock time (no rolling to tomorrow).
+    private func todayOccurrence(of text: String, now: Date) -> Date? {
+        guard let (h, m) = parseHourMinute(text) else { return nil }
+        return Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: now)
     }
 
     @objc private func toggleLaunchAtLogin() {
@@ -207,7 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         caffeinateProcess?.isRunning == true
     }
 
-    private func startCaffeinate(timeout: TimeInterval?) {
+    private func startCaffeinate(timeout: TimeInterval?, daily: Bool = false) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
         // -d -i: prevent display + idle sleep while still allowing manual lock.
@@ -224,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.caffeinateProcess = nil
                 self?.startDate = nil
                 self?.timeout = nil
+                self?.isDailySession = false
                 self?.updateUI()
             }
         }
@@ -233,10 +386,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             caffeinateProcess = process
             startDate = Date()
             self.timeout = timeout
+            self.isDailySession = daily
         } catch {
             caffeinateProcess = nil
             startDate = nil
             self.timeout = nil
+            self.isDailySession = false
             NSLog("Failed to launch caffeinate: \(error)")
         }
     }
@@ -251,6 +406,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         caffeinateProcess = nil
         startDate = nil
         timeout = nil
+        isDailySession = false
     }
 
     // MARK: - UI
@@ -267,6 +423,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleMenuItem.title = active ? "Turn Off" : "Turn On"
 
         launchAtLoginItem.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+
+        dailyMenuItem.title = "Auto-start daily until \(dailyTime)"
+        dailyMenuItem.state = dailyEnabled ? .on : .off
+
+        weekdaysMenuItem.state = weekdaysOnly ? .on : .off
+        weekdaysMenuItem.isEnabled = dailyEnabled
 
         // Check the preset that matches the running session (if any).
         for (index, item) in presetMenuItems.enumerated() {
