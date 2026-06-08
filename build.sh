@@ -13,11 +13,12 @@ echo "Cleaning previous build..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR"
 
-echo "Compiling Swift sources..."
-swiftc -O \
-    -framework AppKit \
-    -o "$MACOS_DIR/$APP_NAME" \
-    Sources/main.swift
+# Build a universal binary (arm64 + x86_64) so it runs on both Apple Silicon and Intel.
+echo "Compiling Swift sources (universal arm64 + x86_64)..."
+swiftc -O -framework AppKit -target arm64-apple-macos13.0  -o "$BUILD_DIR/$APP_NAME-arm64"  Sources/main.swift
+swiftc -O -framework AppKit -target x86_64-apple-macos13.0 -o "$BUILD_DIR/$APP_NAME-x86_64" Sources/main.swift
+lipo -create -output "$MACOS_DIR/$APP_NAME" "$BUILD_DIR/$APP_NAME-arm64" "$BUILD_DIR/$APP_NAME-x86_64"
+rm -f "$BUILD_DIR/$APP_NAME-arm64" "$BUILD_DIR/$APP_NAME-x86_64"
 
 echo "Copying Info.plist..."
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"

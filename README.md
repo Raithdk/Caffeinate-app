@@ -179,13 +179,26 @@ Every push to `main` publishes a new GitHub Release automatically, via
 - The version is **auto-incremented** — the workflow reads the latest release tag and
   bumps the last number (e.g. `v1.3` → `v1.4`), stamps it into `Info.plist`, and builds
   with it. No manual version bumping.
-- The built app is zipped and attached to the release, with auto-generated release notes.
+- The build is **universal** (arm64 + x86_64), so it runs on both Apple Silicon and Intel.
+- The built app is zipped and attached to the release, with install instructions plus
+  auto-generated release notes.
 
 So **Check for Updates…** in the app will see each new release right after a push. The
 workflow uses the repo's built-in `GITHUB_TOKEN`, so there's nothing to configure.
 
-> The published `.app` is ad-hoc signed, not notarized — fine for personal use; other
-> people downloading it will see a Gatekeeper prompt on first open.
+### Opening a downloaded release
+
+The published `.app` is **ad-hoc signed, not notarized**, so macOS quarantines it after
+download and it won't launch on a double-click. Clear the quarantine flag once, then open:
+
+```sh
+xattr -dr com.apple.quarantine Caffinate.app
+open Caffinate.app
+```
+
+(These same steps are included in every release's notes.) For a friction-free
+double-click experience you'd need to notarize the app with a paid Apple Developer
+account — overkill for personal use.
 
 ---
 
@@ -208,9 +221,15 @@ caffinate-app/
 
 ## Troubleshooting
 
-- **"Apple could not verify…" / Gatekeeper warning.** The app is only ad-hoc signed
-  (not notarized). If macOS blocks it, right-click the app → **Open**, then confirm; or
-  allow it under **System Settings → Privacy & Security**.
+- **Downloaded app won't open / no menu bar icon / nothing happens.** A release you
+  downloaded is quarantined by macOS, and because the app is ad-hoc signed (not notarized)
+  Gatekeeper silently blocks it. Clear the quarantine flag, then open it:
+  ```sh
+  xattr -dr com.apple.quarantine Caffinate.app
+  open Caffinate.app
+  ```
+  Right-click → **Open** is often *not* enough for ad-hoc-signed apps — use the command
+  above. (Apps built locally via `./install.sh` aren't affected; the script already does this.)
 - **Icon doesn't appear.** Make sure the app is actually running
   (`pgrep -f Caffinate`). The menu bar may be full — try widening it or removing other
   menu bar items.
