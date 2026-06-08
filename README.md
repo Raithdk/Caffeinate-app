@@ -195,9 +195,16 @@ xattr -dr com.apple.quarantine Caffinate.app
 open Caffinate.app
 ```
 
-(These same steps are included in every release's notes.) For a friction-free
-double-click experience you'd need to notarize the app with a paid Apple Developer
-account — overkill for personal use.
+(These same steps are included in every release's notes.)
+
+**No Terminal? Use "Open Anyway":** double-click the app — macOS blocks it with a warning.
+Then go to **System Settings → Privacy & Security**, scroll down to the "Caffinate was
+blocked" message, and click **Open Anyway** and confirm. You only do this once; macOS
+remembers it and launches the app silently from then on. (On macOS 15+/26 the old
+right-click → Open trick no longer works — it has to be the Settings button.)
+
+For a friction-free double-click experience with no warning at all you'd need to notarize
+the app with a paid Apple Developer account — overkill for personal use.
 
 ---
 
@@ -232,6 +239,18 @@ caffinate-app/
 - **Icon doesn't appear.** Make sure the app is actually running
   (`pgrep -f Caffinate`). The menu bar may be full — try widening it or removing other
   menu bar items.
+- **`mkdir: build: Operation not permitted` when building.** The project folder is in a
+  macOS-protected or quarantined location (e.g. `~/Downloads`, `~/Desktop`, `~/Documents`,
+  or iCloud Drive) that Terminal can't write to. Move it to your home directory and clear
+  the quarantine flag, then build:
+  ```sh
+  mv ~/Downloads/caffinate-app ~/caffinate-app
+  cd ~/caffinate-app
+  xattr -dr com.apple.quarantine .
+  ./install.sh
+  ```
+  Alternatively, grant Terminal **Full Disk Access** under System Settings → Privacy &
+  Security and re-run.
 - **Mac still sleeps.** Some sleep is forced regardless (e.g. low battery, closing the
   lid on some models). `caffeinate` prevents *idle* and *display* sleep, not these.
 
