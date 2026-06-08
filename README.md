@@ -98,7 +98,7 @@ process is stopped and your normal sleep settings take over again.
 
 ## Requirements
 
-- macOS 13 (Ventura) or later
+- macOS 13 (Ventura) or later, on **Apple Silicon (arm64)**
 - Xcode command-line tools (provides the `swiftc` compiler), for building from source:
   ```sh
   xcode-select --install
@@ -179,7 +179,6 @@ Every push to `main` publishes a new GitHub Release automatically, via
 - The version is **auto-incremented** — the workflow reads the latest release tag and
   bumps the last number (e.g. `v1.3` → `v1.4`), stamps it into `Info.plist`, and builds
   with it. No manual version bumping.
-- The build is **universal** (arm64 + x86_64), so it runs on both Apple Silicon and Intel.
 - The built app is zipped and attached to the release, with install instructions plus
   auto-generated release notes.
 
